@@ -35,7 +35,8 @@ SCK (SCLK) = GPIO11
 
 <h2>First Use</h2>
 
-"from st7796_rpi import ST7796
+'''ruby
+from st7796_rpi import ST7796
 from st7796_rpi.graphics import Graphics, BLACK, WHITE, RED, GREEN, BLUE
 
 # Init display
@@ -60,7 +61,8 @@ graphics.draw_rectangle(10, 80, 100, 40, RED)
 graphics.draw_circle(160, 100, 30, BLUE)
 
 # Draw lines
-graphics.draw_line(10, 160, 200, 160, GREEN)"
+graphics.draw_line(10, 160, 200, 160, GREEN)
+'''
 
 <h2>Compatibility</h2>
 
