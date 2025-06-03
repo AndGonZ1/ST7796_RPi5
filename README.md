@@ -1,7 +1,7 @@
 # ST7796_RPi5
 ST7796 Driver for Raspberry Pi 5
 
-This library can show text and graphics on a LCD display with ST7796 controller using a Rpi5.
+This library can show text and graphics on a LCD display with ST7796 controller using a Rpi5,
 useful for IoT projects or embbebed systems.
 
 * SPI Frec: 80 MHz.
