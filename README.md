@@ -12,30 +12,36 @@ useful for IoT projects or embbebed systems.
 
 <h2>Installation</h2>
 
-From Pypi
-
-* pip install ST7796_RPi5
-
-
-Manual installation
-
-* git clone https://www.github.com/AndGonZ1/ST7796_RPi5.git
-* cd ST7796_RPi5
-* pip install -e .
-
+From Pypi:
+```
+pip install ST7796_RPi5
+```
+Manual installation:
+```
+git clone https://www.github.com/AndGonZ1/ST7796_RPi5.git
+cd ST7796_RPi5
+pip install -e .
+```
 <h2>Wiring</h2>
 
 VCC = 5V (ST7796 board has a level convertion circuit from 5 to 3.3V)
+
 GND = GND
+
 LCD_CS = GPIO22
+
 LCD_RST = GPIO6
+
 LCD_RS = GPIO5
+
 SDI (MOSI) = GPIO10  
+
 SCK (SCLK) = GPIO11
+
 
 <h2>First Use</h2>
 
-'''ruby
+```
 from st7796_rpi import ST7796
 from st7796_rpi.graphics import Graphics, BLACK, WHITE, RED, GREEN, BLUE
 
@@ -62,7 +68,7 @@ graphics.draw_circle(160, 100, 30, BLUE)
 
 # Draw lines
 graphics.draw_line(10, 160, 200, 160, GREEN)
-'''
+```
 
 <h2>Compatibility</h2>
 
