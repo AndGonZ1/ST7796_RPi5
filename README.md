@@ -23,7 +23,8 @@ cd ST7796_RPi5
 pip install -e .
 ```
 <h2>Wiring</h2>
-
+<h6>
+    
 VCC = 5V (ST7796 board has a level convertion circuit from 5 to 3.3V)
 
 GND = GND
@@ -38,6 +39,7 @@ SDI (MOSI) = GPIO10
 
 SCK (SCLK) = GPIO11
 
+</h6>
 
 <h2>First Use</h2>
 
