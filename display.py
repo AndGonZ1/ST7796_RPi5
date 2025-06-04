@@ -3,8 +3,47 @@ Clase principal que maneja la comunicación con la pantalla ST7796
 """
 import time
 import spidev
-import gpiod
 import sys
+import platform
+import os
+
+# Intentar cargar los módulos GPIO según disponibilidad
+GPIO = None
+
+# Función para detectar automáticamente la plataforma de hardware
+def detect_rpi_model():
+    try:
+        with open('/proc/device-tree/model', 'r') as f:
+            model = f.read()
+            if '5' in model:
+                return 5
+            elif '4' in model:
+                return 4
+            else:
+                return 3  # Suponemos 3 como predeterminado para modelos anteriores
+    except:
+        # Si no podemos detectar, asumimos 4 por seguridad
+        return 4
+
+def import_gpio():
+    global GPIO
+    try:
+        # Intentar primero con RPi.GPIO (funciona en la mayoría de los casos)
+        import RPi.GPIO as GPIO
+        return "RPi.GPIO"
+    except ImportError:
+        try:
+            # Intentar con gpiod como alternativa
+            import gpiod
+            return "gpiod"
+        except ImportError:
+            try:
+                # Último intento con lgpio (Raspberry Pi 5)
+                import lgpio
+                return "lgpio"
+            except ImportError:
+                print("ERROR: No se pudo cargar ningún módulo GPIO compatible")
+                sys.exit(1)
 
 from .graphics import (
     BLACK, WHITE, RED, GREEN, BLUE, 
@@ -23,7 +62,6 @@ class ST7796:
         rst_pin (int): Pin de Reset (GPIO)
         cs_pin (int): Pin de Chip Select (GPIO)
         spi_speed_hz (int): Velocidad SPI en Hz
-        gpio_chip (str): Nombre del chip GPIO (gpiochip4 para RPi 5, gpiochip0 para RPi 4)
     """
     def __init__(self, width=320, height=480, rotation=0, 
                  dc_pin=5, rst_pin=6, cs_pin=22, 
@@ -37,7 +75,14 @@ class ST7796:
         self.rst_pin = rst_pin
         self.cs_pin = cs_pin
         
-        # Inicializar GPIO con gpiod
+        # Detectar plataforma y módulo GPIO
+        self.rpi_model = detect_rpi_model() if os.name != 'nt' else 0
+        self.gpio_module = import_gpio() if os.name != 'nt' else "DUMMY"
+        
+        print(f"Modelo RPi detectado: {self.rpi_model}")
+        print(f"Módulo GPIO: {self.gpio_module}")
+        
+        # Inicializar GPIO
         self._init_gpio(gpio_chip)
         
         # Inicializar SPI
@@ -52,31 +97,87 @@ class ST7796:
         self.char_buffer_cache = {}
     
     def _init_gpio(self, gpio_chip):
-        """Inicializa los pines GPIO"""
+        """Inicializa los pines GPIO utilizando el módulo disponible"""
         try:
-            # Intentar auto-detectar el chip GPIO adecuado
-            if gpio_chip is None:
-                try:
-                    # RPi 5 usa gpiochip4
-                    self.chip = gpiod.Chip('gpiochip4')
-                    print("Usando gpiochip4 (RPi 5)")
-                except:
-                    # RPi 4 y anteriores usan gpiochip0
-                    self.chip = gpiod.Chip('gpiochip0')
-                    print("Usando gpiochip0 (RPi 4 o anterior)")
+            if self.gpio_module == "RPi.GPIO":
+                # Inicialización con RPi.GPIO
+                import RPi.GPIO as GPIO
+                GPIO.setmode(GPIO.BCM)
+                GPIO.setwarnings(False)
+                
+                # Configurar pines como salidas
+                GPIO.setup(self.dc_pin, GPIO.OUT)
+                GPIO.setup(self.rst_pin, GPIO.OUT)
+                GPIO.setup(self.cs_pin, GPIO.OUT)
+                
+                # Establecer niveles iniciales
+                GPIO.output(self.dc_pin, GPIO.HIGH)
+                GPIO.output(self.rst_pin, GPIO.HIGH)
+                GPIO.output(self.cs_pin, GPIO.HIGH)
+                
+                # Guardar referencia a GPIO para métodos
+                self.GPIO = GPIO
+                print("GPIO inicializado con RPi.GPIO")
+                
+            elif self.gpio_module == "gpiod":
+                # Inicialización con gpiod
+                import gpiod
+                
+                # Intentar auto-detectar el chip GPIO adecuado
+                if gpio_chip is None:
+                    try:
+                        # RPi 5 usa gpiochip4
+                        if self.rpi_model == 5:
+                            self.chip = gpiod.Chip('gpiochip4')
+                            print("Usando gpiochip4 (RPi 5)")
+                        else:
+                            # RPi 4 y anteriores usan gpiochip0
+                            self.chip = gpiod.Chip('gpiochip0')
+                            print("Usando gpiochip0 (RPi 4 o anterior)")
+                    except Exception:
+                        # Si falla, intentar con gpiochip0 como último recurso
+                        self.chip = gpiod.Chip('gpiochip0')
+                else:
+                    self.chip = gpiod.Chip(gpio_chip)
+                
+                # Configurar líneas GPIO
+                self.dc_line = self.chip.get_line(self.dc_pin)
+                self.rst_line = self.chip.get_line(self.rst_pin)
+                self.cs_line = self.chip.get_line(self.cs_pin)
+                
+                # Solicitar líneas para salida
+                self.dc_line.request(consumer="st7796", type=gpiod.LINE_REQ_DIR_OUT)
+                self.rst_line.request(consumer="st7796", type=gpiod.LINE_REQ_DIR_OUT)
+                self.cs_line.request(consumer="st7796", type=gpiod.LINE_REQ_DIR_OUT)
+                print("GPIO inicializado con gpiod")
+                
+            elif self.gpio_module == "lgpio":
+                # Inicialización con lgpio (para RPi 5)
+                import lgpio
+                
+                self.gpio_handle = lgpio.gpiochip_open(4 if self.rpi_model == 5 else 0)
+                
+                # Configurar pines como salidas
+                lgpio.gpio_claim_output(self.gpio_handle, self.dc_pin)
+                lgpio.gpio_claim_output(self.gpio_handle, self.rst_pin)
+                lgpio.gpio_claim_output(self.gpio_handle, self.cs_pin)
+                
+                # Establecer niveles iniciales
+                lgpio.gpio_write(self.gpio_handle, self.dc_pin, 1)
+                lgpio.gpio_write(self.gpio_handle, self.rst_pin, 1)
+                lgpio.gpio_write(self.gpio_handle, self.cs_pin, 1)
+                
+                # Guardar referencia a lgpio
+                self.lgpio = lgpio
+                print("GPIO inicializado con lgpio")
+            
+            elif self.gpio_module == "DUMMY":
+                # Para desarrollo en sistemas no-RPi
+                print("Modo de simulación GPIO (no RPi)")
+                
             else:
-                self.chip = gpiod.Chip(gpio_chip)
-            
-            # Configurar líneas GPIO
-            self.dc_line = self.chip.get_line(self.dc_pin)
-            self.rst_line = self.chip.get_line(self.rst_pin)
-            self.cs_line = self.chip.get_line(self.cs_pin)
-            
-            # Solicitar líneas para salida
-            self.dc_line.request(consumer="st7796", type=gpiod.LINE_REQ_DIR_OUT)
-            self.rst_line.request(consumer="st7796", type=gpiod.LINE_REQ_DIR_OUT)
-            self.cs_line.request(consumer="st7796", type=gpiod.LINE_REQ_DIR_OUT)
-            
+                raise Exception("Módulo GPIO no soportado")
+                
         except Exception as e:
             print(f"Error al inicializar GPIO: {e}")
             sys.exit(1)
@@ -84,9 +185,14 @@ class ST7796:
     def _init_spi(self, spi_speed_hz):
         """Inicializa el bus SPI"""
         try:
+            if os.name == 'nt':
+                # Modo de simulación para sistemas no-RPi
+                print("Modo de simulación SPI (no RPi)")
+                return
+                
             self.spi = spidev.SpiDev()
             self.spi.open(0, 0)  # Bus 0, dispositivo 0
-            self.spi.max_speed_hz = 80000000  # 80MHz para máxima velocidad
+            self.spi.max_speed_hz = spi_speed_hz
             self.spi.mode = 0
             print(f"SPI inicializado a {spi_speed_hz/1000000:.1f} MHz")
         except Exception as e:
@@ -95,29 +201,96 @@ class ST7796:
     
     def write_cmd(self, cmd):
         """Envía un comando a la pantalla"""
-        self.dc_line.set_value(0)  # Comando
-        self.cs_line.set_value(0)  # Seleccionar chip
-        self.spi.writebytes([cmd])
-        self.cs_line.set_value(1)  # Deseleccionar chip
+        if self.gpio_module == "RPi.GPIO":
+            self.GPIO.output(self.dc_pin, self.GPIO.LOW)  # Comando
+            self.GPIO.output(self.cs_pin, self.GPIO.LOW)  # Seleccionar chip
+            self.spi.writebytes([cmd])
+            self.GPIO.output(self.cs_pin, self.GPIO.HIGH)  # Deseleccionar chip
+            
+        elif self.gpio_module == "gpiod":
+            self.dc_line.set_value(0)  # Comando
+            self.cs_line.set_value(0)  # Seleccionar chip
+            self.spi.writebytes([cmd])
+            self.cs_line.set_value(1)  # Deseleccionar chip
+            
+        elif self.gpio_module == "lgpio":
+            self.lgpio.gpio_write(self.gpio_handle, self.dc_pin, 0)  # Comando
+            self.lgpio.gpio_write(self.gpio_handle, self.cs_pin, 0)  # Seleccionar chip
+            self.spi.writebytes([cmd])
+            self.lgpio.gpio_write(self.gpio_handle, self.cs_pin, 1)  # Deseleccionar chip
+            
+        elif self.gpio_module == "DUMMY":
+            # Modo simulación
+            pass
     
     def write_data(self, data):
         """Envía datos a la pantalla"""
-        self.dc_line.set_value(1)  # Datos
-        self.cs_line.set_value(0)  # Seleccionar chip
-        if isinstance(data, list):
-            self.spi.writebytes(data)
-        else:
-            self.spi.writebytes([data])
-        self.cs_line.set_value(1)  # Deseleccionar chip
+        if self.gpio_module == "RPi.GPIO":
+            self.GPIO.output(self.dc_pin, self.GPIO.HIGH)  # Datos
+            self.GPIO.output(self.cs_pin, self.GPIO.LOW)  # Seleccionar chip
+            
+            if isinstance(data, list):
+                self.spi.writebytes(data)
+            else:
+                self.spi.writebytes([data])
+                
+            self.GPIO.output(self.cs_pin, self.GPIO.HIGH)  # Deseleccionar chip
+            
+        elif self.gpio_module == "gpiod":
+            self.dc_line.set_value(1)  # Datos
+            self.cs_line.set_value(0)  # Seleccionar chip
+            
+            if isinstance(data, list):
+                self.spi.writebytes(data)
+            else:
+                self.spi.writebytes([data])
+                
+            self.cs_line.set_value(1)  # Deseleccionar chip
+            
+        elif self.gpio_module == "lgpio":
+            self.lgpio.gpio_write(self.gpio_handle, self.dc_pin, 1)  # Datos
+            self.lgpio.gpio_write(self.gpio_handle, self.cs_pin, 0)  # Seleccionar chip
+            
+            if isinstance(data, list):
+                self.spi.writebytes(data)
+            else:
+                self.spi.writebytes([data])
+                
+            self.lgpio.gpio_write(self.gpio_handle, self.cs_pin, 1)  # Deseleccionar chip
+            
+        elif self.gpio_module == "DUMMY":
+            # Modo simulación
+            pass
     
     def reset(self):
         """Resetea la pantalla mediante el pin de reset"""
         print("Reseteando pantalla...")
-        self.rst_line.set_value(1)
-        time.sleep(0.05)
-        self.rst_line.set_value(0)
-        time.sleep(0.1)
-        self.rst_line.set_value(1)
+        
+        if self.gpio_module == "RPi.GPIO":
+            self.GPIO.output(self.rst_pin, self.GPIO.HIGH)
+            time.sleep(0.05)
+            self.GPIO.output(self.rst_pin, self.GPIO.LOW)
+            time.sleep(0.1)
+            self.GPIO.output(self.rst_pin, self.GPIO.HIGH)
+            
+        elif self.gpio_module == "gpiod":
+            self.rst_line.set_value(1)
+            time.sleep(0.05)
+            self.rst_line.set_value(0)
+            time.sleep(0.1)
+            self.rst_line.set_value(1)
+            
+        elif self.gpio_module == "lgpio":
+            self.lgpio.gpio_write(self.gpio_handle, self.rst_pin, 1)
+            time.sleep(0.05)
+            self.lgpio.gpio_write(self.gpio_handle, self.rst_pin, 0)
+            time.sleep(0.1)
+            self.lgpio.gpio_write(self.gpio_handle, self.rst_pin, 1)
+            
+        elif self.gpio_module == "DUMMY":
+            # Modo simulación
+            pass
+            
         time.sleep(0.05)
     
     def _init_display(self):
@@ -307,9 +480,21 @@ class ST7796:
         color_high = (color >> 8) & 0xFF
         color_low = color & 0xFF
         
+        if self.gpio_module == "DUMMY":
+            # Modo simulación
+            print(f"Simulación: Pantalla llena con color 0x{color:04X}")
+            return
+        
         # Configurar para envío de datos
-        self.dc_line.set_value(1)  # Datos
-        self.cs_line.set_value(0)  # Seleccionar chip
+        if self.gpio_module == "RPi.GPIO":
+            self.GPIO.output(self.dc_pin, self.GPIO.HIGH)  # Datos
+            self.GPIO.output(self.cs_pin, self.GPIO.LOW)   # Seleccionar chip
+        elif self.gpio_module == "gpiod":
+            self.dc_line.set_value(1)  # Datos
+            self.cs_line.set_value(0)  # Seleccionar chip
+        elif self.gpio_module == "lgpio":
+            self.lgpio.gpio_write(self.gpio_handle, self.dc_pin, 1)  # Datos
+            self.lgpio.gpio_write(self.gpio_handle, self.cs_pin, 0)  # Seleccionar chip
         
         # Enviamos el color en bloques para mayor eficiencia
         buffer_size = 1024
@@ -324,7 +509,13 @@ class ST7796:
             buffer = [color_high, color_low] * remaining
             self.spi.writebytes(buffer)
         
-        self.cs_line.set_value(1)  # Deseleccionar chip
+        # Deseleccionar chip
+        if self.gpio_module == "RPi.GPIO":
+            self.GPIO.output(self.cs_pin, self.GPIO.HIGH)
+        elif self.gpio_module == "gpiod":
+            self.cs_line.set_value(1)
+        elif self.gpio_module == "lgpio":
+            self.lgpio.gpio_write(self.gpio_handle, self.cs_pin, 1)
     
     def draw_pixel(self, x, y, color):
         """
@@ -340,11 +531,26 @@ class ST7796:
             
         self.set_address_window(x, y, x, y)
         
-        # Enviar color
-        self.dc_line.set_value(1)  # Datos
-        self.cs_line.set_value(0)  # Seleccionar chip
-        self.spi.writebytes([(color >> 8) & 0xFF, color & 0xFF])
-        self.cs_line.set_value(1)  # Deseleccionar chip
+        # Modo simulación
+        if self.gpio_module == "DUMMY":
+            return
+        
+        # Enviar color según el módulo GPIO
+        if self.gpio_module == "RPi.GPIO":
+            self.GPIO.output(self.dc_pin, self.GPIO.HIGH)  # Datos
+            self.GPIO.output(self.cs_pin, self.GPIO.LOW)   # Seleccionar chip
+            self.spi.writebytes([(color >> 8) & 0xFF, color & 0xFF])
+            self.GPIO.output(self.cs_pin, self.GPIO.HIGH)  # Deseleccionar chip
+        elif self.gpio_module == "gpiod":
+            self.dc_line.set_value(1)  # Datos
+            self.cs_line.set_value(0)  # Seleccionar chip
+            self.spi.writebytes([(color >> 8) & 0xFF, color & 0xFF])
+            self.cs_line.set_value(1)  # Deseleccionar chip
+        elif self.gpio_module == "lgpio":
+            self.lgpio.gpio_write(self.gpio_handle, self.dc_pin, 1)  # Datos
+            self.lgpio.gpio_write(self.gpio_handle, self.cs_pin, 0)  # Seleccionar chip
+            self.spi.writebytes([(color >> 8) & 0xFF, color & 0xFF])
+            self.lgpio.gpio_write(self.gpio_handle, self.cs_pin, 1)  # Deseleccionar chip
 
     def draw_rectangle_optimized(self, x, y, width, height, color):
         """Versión optimizada que reduce el número de transacciones SPI"""
@@ -366,13 +572,25 @@ class ST7796:
             
         self.set_address_window_fast(x, y, x+width-1, y+height-1)
         
+        # Modo simulación
+        if self.gpio_module == "DUMMY":
+            print(f"Simulación: Rectángulo en ({x},{y}) tamaño {width}x{height} color 0x{color:04X}")
+            return
+        
         # Preparar color
         color_hi = (color >> 8) & 0xFF
         color_lo = color & 0xFF
         
-        # Enviar color repetidamente
-        self.dc_line.set_value(1)
-        self.cs_line.set_value(0)
+        # Establecer pines según el módulo GPIO
+        if self.gpio_module == "RPi.GPIO":
+            self.GPIO.output(self.dc_pin, self.GPIO.HIGH)  # Datos
+            self.GPIO.output(self.cs_pin, self.GPIO.LOW)   # Seleccionar chip
+        elif self.gpio_module == "gpiod":
+            self.dc_line.set_value(1)  # Datos
+            self.cs_line.set_value(0)  # Seleccionar chip
+        elif self.gpio_module == "lgpio":
+            self.lgpio.gpio_write(self.gpio_handle, self.dc_pin, 1)  # Datos
+            self.lgpio.gpio_write(self.gpio_handle, self.cs_pin, 0)  # Seleccionar chip
         
         # Crear un buffer único para toda la operación
         pixel_count = width * height
@@ -395,15 +613,36 @@ class ST7796:
             buffer = [color_hi, color_lo] * pixel_count
             self.spi.writebytes(buffer)
         
-        self.cs_line.set_value(1)
+        # Deseleccionar chip según el módulo GPIO
+        if self.gpio_module == "RPi.GPIO":
+            self.GPIO.output(self.cs_pin, self.GPIO.HIGH)
+        elif self.gpio_module == "gpiod":
+            self.cs_line.set_value(1)
+        elif self.gpio_module == "lgpio":
+            self.lgpio.gpio_write(self.gpio_handle, self.cs_pin, 1)
 
     def close(self):
         """Libera los recursos utilizados"""
         try:
-            self.spi.close()
-            self.dc_line.release()
-            self.rst_line.release()
-            self.cs_line.release()
+            if self.gpio_module == "DUMMY":
+                print("Simulación: Recursos liberados")
+                return
+                
+            if hasattr(self, 'spi'):
+                self.spi.close()
+                
+            if self.gpio_module == "RPi.GPIO":
+                self.GPIO.cleanup([self.dc_pin, self.rst_pin, self.cs_pin])
+            elif self.gpio_module == "gpiod":
+                self.dc_line.release()
+                self.rst_line.release()
+                self.cs_line.release()
+            elif self.gpio_module == "lgpio":
+                self.lgpio.gpio_free(self.gpio_handle, self.dc_pin)
+                self.lgpio.gpio_free(self.gpio_handle, self.rst_pin)
+                self.lgpio.gpio_free(self.gpio_handle, self.cs_pin)
+                self.lgpio.gpiochip_close(self.gpio_handle)
+                
             print("Recursos liberados correctamente")
-        except:
-            pass
+        except Exception as e:
+            print(f"Error al liberar recursos: {e}")

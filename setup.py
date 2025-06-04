@@ -17,7 +17,8 @@ setup(
     ],
     python_requires=">=3.6",
     install_requires=[
-        "spidev",
-        "libgpiod",
+        "spidev>=3.5",
+        "RPi.GPIO>=0.7.0",
+        "numpy",
     ],
 )
