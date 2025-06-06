@@ -74,6 +74,6 @@ graphics.draw_line(10, 160, 200, 160, GREEN)
 
 <h2>Compatibility</h2>
 
-* Raspberry Pi 2, 3, 4 and 5.
+* Raspberry Pi 5.
 * Python 3.6+
 * Requires spidev and RPi.GPIO
